@@ -110,10 +110,14 @@ del() { echo "rm -f $DIR/$1 2>/dev/null; content delete --uri $URI/$1 2>/dev/nul
 # empty it too: the launcher's wallpaper picker (LauncherSettingsActivity.showWallpaperPicker) lists that folder
 # itself, and an on-TV pick of one of its pictures is read back from it (WallpaperRotation.chosen), so a reset
 # that left the pictures behind still shows the theme it just removed. Both paths use this one string.
+# avatars/: the header's profile pictures (account_profiles), replaced the same way.
+CLEAR_AVATARS="rm -f $DIR/avatars/*.[jJ][pP][gG] $DIR/avatars/*.[jJ][pP][eE][gG] $DIR/avatars/*.[pP][nN][gG] $DIR/avatars/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/avatars 2>/dev/null"
+# videos/: the video wallpapers the menu picks from (VideoWallpaper), with their names in videos/captions.txt.
+CLEAR_VIDEOS="rm -f $DIR/videos/*.[mM][pP]4 2>/dev/null; content delete --uri $URI/videos 2>/dev/null"
 CLEAR_WALLPAPERS="rm -f $DIR/wallpapers/*.[jJ][pP][gG] $DIR/wallpapers/*.[jJ][pP][eE][gG] $DIR/wallpapers/*.[pP][nN][gG] $DIR/wallpapers/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/wallpapers 2>/dev/null"
 
 if [ "${1:-}" = --reset ]; then
-  tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
+  tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpaper.mp4); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; $CLEAR_AVATARS; $CLEAR_VIDEOS; $(del videos/captions.txt); printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
   "$PY" -I theme_restart.py
   echo reset
   exit 0
@@ -167,6 +171,35 @@ if [ -d "$THEME/wallpapers" ]; then
     esac
   done
 fi
+AVATAR_NAMES=""
+if [ -d "$THEME/avatars" ]; then
+  for IMAGE in "$THEME"/avatars/*; do
+    [ -f "$IMAGE" ] || continue
+    case "$IMAGE" in
+      *.[jJ][pP][gG]|*.[jJ][pP][eE][gG]|*.[pP][nN][gG]|*.[wW][eE][bB][pP])
+        NAME=$(basename "$IMAGE")
+        if [[ ! "$NAME" =~ ^[A-Za-z0-9_.-]+$ || "$NAME" == *..* ]]; then
+          echo "unsupported avatar filename: $NAME (b64push.py takes letters, digits, '.', '_' and '-', with no" \
+            "'..' in the name). Nothing was sent to the TV." >&2
+          exit 2
+        fi
+        AVATAR_NAMES="$AVATAR_NAMES $NAME" ;;
+    esac
+  done
+fi
+VIDEO_NAMES=""
+if [ -d "$THEME/videos" ]; then
+  for VIDEO in "$THEME"/videos/*.[mM][pP]4; do
+    [ -f "$VIDEO" ] || continue
+    NAME=$(basename "$VIDEO")
+    if [[ ! "$NAME" =~ ^[A-Za-z0-9_.-]+$ || "$NAME" == *..* ]]; then
+      echo "unsupported video filename: $NAME (b64push.py takes letters, digits, '.', '_' and '-', with no" \
+        "'..' in the name). Nothing was sent to the TV." >&2
+      exit 2
+    fi
+    VIDEO_NAMES="$VIDEO_NAMES $NAME"
+  done
+fi
 
 tv "mkdir -p $DIR" >/dev/null 2>&1 || true
 tv --push "$THEME/config.json" "$TMP-config.json" >/dev/null
@@ -177,10 +210,33 @@ if [ -f "$THEME/wallpaper.jpg" ]; then
 else
   tv "$(del wallpaper.jpg)" >/dev/null
 fi
+# wallpaper.mp4: a looping video under the picture, which stays as its poster (VideoWallpaper).
+if [ -f "$THEME/wallpaper.mp4" ]; then
+  "$PY" -I b64push.py "$THEME/wallpaper.mp4" "$TMP-wallpaper.mp4"
+  tv "$(put wallpaper.mp4)"
+else
+  tv "$(del wallpaper.mp4)" >/dev/null
+fi
 tv "$CLEAR_WALLPAPERS" >/dev/null
 for NAME in $NAMES; do
   "$PY" -I b64push.py "$THEME/wallpapers/$NAME" "$(stage "wallpapers/$NAME")"
   tv "$(put "wallpapers/$NAME")" >/dev/null
+done
+tv "$CLEAR_VIDEOS" >/dev/null
+for NAME in $VIDEO_NAMES; do
+  "$PY" -I b64push.py "$THEME/videos/$NAME" "$(stage "videos/$NAME")"
+  tv "$(put "videos/$NAME")" >/dev/null
+done
+if [ -f "$THEME/videos/captions.txt" ]; then
+  "$PY" -I b64push.py "$THEME/videos/captions.txt" "$(stage videos/captions.txt)"
+  tv "$(put videos/captions.txt)" >/dev/null
+else
+  tv "$(del videos/captions.txt)" >/dev/null
+fi
+tv "$CLEAR_AVATARS" >/dev/null
+for NAME in $AVATAR_NAMES; do
+  "$PY" -I b64push.py "$THEME/avatars/$NAME" "$(stage "avatars/$NAME")"
+  tv "$(put "avatars/$NAME")" >/dev/null
 done
 # The collection's names (wallpaper_captions); a theme without them leaves no stale names behind.
 if [ -f "$THEME/wallpapers/captions.txt" ]; then

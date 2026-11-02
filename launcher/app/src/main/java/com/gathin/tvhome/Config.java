@@ -97,6 +97,12 @@ final class Config {
     final boolean dateBelowClock;
     /** The VPN state as its own pill after the network pill, instead of a badge inside it (config.xml, vpn_pill). */
     final boolean vpnPill;
+    /** One row on top: a menu button, the date and time centred, the account's picture (config.xml, minimal_header). */
+    final boolean minimalHeader;
+    /** "account|name|picture" lines for the minimal header's account button (config.xml, account_profiles). */
+    final List<String> accountProfiles;
+    /** minimal_header: seconds without a key before Home fades to its date and time alone; 0 never (idle_fade_seconds). */
+    final int idleFadeSeconds;
     /** Language tag the launcher shows itself in instead of the TV's, or "" for the TV's (config.xml, locale). */
     final String locale;
     /** Name after the greeting ("Good morning, Mr. Trịnh"); empty for the greeting alone. */
@@ -252,7 +258,7 @@ final class Config {
     final String glassStyle;
 
     static final String GLOW_RADIAL = "radial", GLOW_HORIZON = "horizon";
-    static final String GLASS_DEFAULT = "glass", GLASS_RIM = "rim", GLASS_HALO = "halo", GLASS_RING = "ring";
+    static final String GLASS_DEFAULT = "glass", GLASS_RIM = "rim", GLASS_HALO = "halo", GLASS_RING = "ring", GLASS_OUTLINE = "outline";
     /** Show each rotating wallpaper's name from wallpapers/captions.txt (config.xml / theme wallpaper_captions). */
     final boolean wallpaperCaptions;
     /** Answer VIEW_INPUTS with the Inputs menu (handle_view_inputs); see InputsRequestActivity. */
@@ -292,7 +298,8 @@ final class Config {
                    boolean keyFilter, boolean dockGlass, String glowStyle, boolean wallpaperCaptions,
                    boolean handleViewInputs, boolean tileMenu, boolean dockEvenPadding, boolean dockBand, boolean cinematicDots, boolean cinematicWhiteFocus, boolean wifiStatusColor, int cinematicScrim, int cinematicArt,
                    Map<String, Set<String>> wallpaperMoods, boolean gamepadPassthrough, boolean consumeVolumeKeys, boolean powerOnHome, boolean homeLongPressHome, boolean wifiStatusWarnings, List<String> topBarApps, boolean showGreeting, boolean headerWhite, boolean clockWallpaper, int clockWallpaperDim, boolean clockGlow, String glassStyle, boolean singleRow, boolean dockBandAll, boolean lunarDate, int lunarUtcOffset, boolean dateBelowClock, boolean vpnPill, String locale, boolean powerOnHomeAlways, boolean inputsConnectedOnly, boolean inputsCecStateOnly,
-                   int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap) {
+                   int openOnStartNetworkWait, boolean openOnStartOnWake, boolean iconOnlyVpn, String clockFormat, boolean backOpensClock, boolean glowSnap,
+                   boolean minimalHeader, List<String> accountProfiles, int idleFadeSeconds) {
         this.handleViewInputs = handleViewInputs;
         this.tileMenu = tileMenu;
         this.inputKeycodes = inputKeycodes;
@@ -326,6 +333,9 @@ final class Config {
         this.lunarUtcOffset = lunarUtcOffset;
         this.dateBelowClock = dateBelowClock;
         this.vpnPill = vpnPill;
+        this.minimalHeader = minimalHeader;
+        this.accountProfiles = Collections.unmodifiableList(accountProfiles);
+        this.idleFadeSeconds = idleFadeSeconds;
         this.locale = locale;
         this.greetingName = greetingName;
         this.moduleCards = moduleCards;
@@ -422,6 +432,7 @@ final class Config {
         String v = value.trim();
         if (GLASS_RIM.equalsIgnoreCase(v)) return GLASS_RIM;
         if (GLASS_RING.equalsIgnoreCase(v)) return GLASS_RING;
+        if (GLASS_OUTLINE.equalsIgnoreCase(v)) return GLASS_OUTLINE;
         return GLASS_HALO.equalsIgnoreCase(v) ? GLASS_HALO : GLASS_DEFAULT;
     }
 
@@ -528,6 +539,9 @@ final class Config {
         boolean wifiStatusWarnings = res.getBoolean(R.bool.wifi_status_warnings);
         boolean dateBelowClock = res.getBoolean(R.bool.date_below_clock);
         boolean vpnPill = res.getBoolean(R.bool.vpn_pill);
+        boolean minimalHeader = res.getBoolean(R.bool.minimal_header);
+        List<String> accountProfiles = new ArrayList<>(Arrays.asList(res.getStringArray(R.array.account_profiles)));
+        int idleFadeSeconds = res.getInteger(R.integer.idle_fade_seconds);
         String locale = res.getString(R.string.locale).trim();
         List<String> topBarApps = new ArrayList<>(Arrays.asList(res.getStringArray(R.array.top_bar_apps)));
         boolean showGreeting = res.getBoolean(R.bool.show_greeting);
@@ -642,6 +656,9 @@ final class Config {
             wifiStatusWarnings = bool(json, "wifi_status_warnings", wifiStatusWarnings);
             dateBelowClock = bool(json, "date_below_clock", dateBelowClock);
             vpnPill = bool(json, "vpn_pill", vpnPill);
+            minimalHeader = bool(json, "minimal_header", minimalHeader);
+            accountProfiles = stringList(json, "account_profiles", accountProfiles);
+            idleFadeSeconds = integer(json, "idle_fade_seconds", idleFadeSeconds, 0, 3600);
             locale = string(json, "locale", locale).trim();
             topBarApps = stringList(json, "top_bar_apps", topBarApps);
             showGreeting = bool(json, "show_greeting", showGreeting);
@@ -716,7 +733,8 @@ final class Config {
                 consumeVolumeKeys, powerOnHome, homeLongPressHome, wifiStatusWarnings, topBarApps, showGreeting, headerWhite, clockWallpaper,
                 Math.max(0, Math.min(90, clockWallpaperDim)), clockGlow, glassStyle, singleRow && dockRow, dockBandAll, lunar, lunarOffset,
                 dateBelowClock, vpnPill, locale, powerOnHomeAlways, inputsConnectedOnly, inputsCecStateOnly,
-                Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap);
+                Math.max(0, Math.min(600, openOnStartNetworkWait)), openOnStartOnWake, iconOnlyVpn, clockFormat, backOpensClock, glowSnap,
+                minimalHeader, accountProfiles, idleFadeSeconds);
     }
 
     /**

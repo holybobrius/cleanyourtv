@@ -155,4 +155,8 @@
     <string name="clock_format_system">Системные</string>
     <string name="clock_format_12">12-часовой</string>
     <string name="clock_format_24">24-часовой</string>
+    <string name="all_apps">Все приложения</string>
+    <string name="menu">Меню</string>
+    <string name="background">Фон</string>
+    <string name="wallpaper_picture">Картинка</string>
 </resources>

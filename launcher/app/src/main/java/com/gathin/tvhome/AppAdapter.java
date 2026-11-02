@@ -1,5 +1,6 @@
 package com.gathin.tvhome;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
@@ -14,18 +15,22 @@ import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.Gravity;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.animation.DecelerateInterpolator;
-import android.view.animation.OvershootInterpolator;
+import android.view.animation.Interpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -98,6 +103,13 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     static final float FOCUS_SCALE = 1.10f;
+    /** How dark an unfocused tile is (0-255 black over it), and how long focus takes to move. */
+    static final int REST_DIM = 0x4D;
+    static final int FOCUS_MS = 160;
+    /** glass_style outline (Google TV's focus): the focused tile grows a little and gets a white outline a few dp out. */
+    static final float OUTLINE_SCALE = 1.025f;
+    static final float OUTLINE_GAP_DP = 3f, OUTLINE_STROKE_DP = 3f;
+    static final int OUTLINE_COLOR = 0xF2FFFFFF;
     /** Design size of a tile (dp); tiles shrink from here when the columns don't fit, see tileWidthPx. */
     // Quiet Graphite: a little more presence than the stock 180dp cards, while keeping the 16:9 silhouette.
     static final float DESIGN_W_DP = 196f, DESIGN_H_DP = 110f;
@@ -230,6 +242,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final boolean reducedMotion;
     /** The focus zoom may overshoot (config.xml, focus_overshoot). */
     private final boolean focusOvershoot;
+    /** glass_style outline: every tile draws its own focus outline (Google TV) instead of the glass sliding between them. */
+    private final boolean tileOutline;
     /** Package to the action its tile sends instead of the start screen (config.xml, launch_actions). */
     private final Map<String, String> launchActions;
     /** Hold OK opens the activity's tile menu (config.xml, tile_menu); false opens App info, as before. */
@@ -256,6 +270,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.showLibrary = LibraryApps.showPill(cfg.appLibrary, cfg.libraryButton, cfg.showLibraryPill);
         this.reducedMotion = cfg.reducedMotion;
         this.focusOvershoot = cfg.focusOvershoot;
+        this.tileOutline = Config.GLASS_OUTLINE.equals(cfg.glassStyle);
         this.rowsBelowDock = cfg.rowsBelowDock;
         this.dockTitle = cfg.dockTitle;
         this.dockRow = cfg.dockRow;
@@ -474,7 +489,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             View label = v.findViewById(R.id.label);
             label.setPadding(label.getPaddingLeft(), label.getPaddingTop(), label.getPaddingRight(), Math.round(4f * density));
         }
-        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot);
+        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot, tileOutline);
     }
 
     @Override
@@ -504,12 +519,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         h.inDock = dockKind;
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
         h.name.setAlpha(focused ? 1f : restNameAlpha);
-        h.card.setScaleX(focused && animations ? focusScale() : 1f);
-        h.card.setScaleY(focused && animations ? focusScale() : 1f);
-        h.card.setTranslationY(focused && advancedEffects && !dockKind ? -4f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.banner.setScaleX(focused && advancedEffects ? 1.035f : 1f);
-        h.banner.setScaleY(focused && advancedEffects ? 1.035f : 1f);
+        h.showFocus(focused, false);
         // A fully opaque banner covers the whole card (centerCrop), so the card's own fill under it is drawn for
         // nothing on every frame; keep it under banners with transparent parts and under icon tiles.
         h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE ? null : h.cardBackground);
@@ -686,6 +696,38 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return position >= 0 && position < items.size() ? items.get(position).label : "";
     }
 
+    /** An app the all-apps list shows: not an empty dock slot, a module card or the launcher's own tile. */
+    boolean isListableAt(int position) {
+        if (position < 0 || position >= items.size()) return false;
+        Entry e = items.get(position);
+        return e.kind == Entry.APP && !e.pkg.equals(ctx.getPackageName());
+    }
+
+    /** The app's square icon for the all-apps list, loaded once and kept with the adapter's apps. */
+    Drawable iconAt(int position) {
+        if (position < 0 || position >= items.size()) return null;
+        Entry e = items.get(position);
+        Drawable cached = listIcons.get(e.component);
+        if (cached != null) return cached;
+        Drawable icon = e.icon;
+        if (icon == null) {
+            try {
+                icon = ctx.getPackageManager().getActivityIcon(e.component);
+            } catch (PackageManager.NameNotFoundException ex) {
+                icon = ctx.getPackageManager().getDefaultActivityIcon();
+            }
+        }
+        listIcons.put(e.component, icon);
+        return icon;
+    }
+
+    private final Map<ComponentName, Drawable> listIcons = new HashMap<>();
+
+    /** Opens the app at this position as its tile would. */
+    void launchAt(int position) {
+        if (position >= 0 && position < items.size()) launch(items.get(position));
+    }
+
     String packageAt(int position) {
         return position >= 0 && position < items.size() ? items.get(position).pkg : null;
     }
@@ -697,8 +739,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return e.banner != null ? e.banner : e.icon;
     }
 
+    /** Tiles keep their size on focus: the ring and the brightness mark the focused one. */
     float focusScale() {
-        return !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+        return 1f;
     }
 
     /** A vivid colour sampled from the app's banner (or icon), cached per entry; a card's accent when it set one. */
@@ -935,11 +978,17 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         /** Alpha of the name while the tile is not focused (always_show_names). */
         final float restNameAlpha;
         final boolean overshoot;
+        /** Darkens the tile while it is not focused; its alpha is animated, so focus moves as a brightness change. */
+        private final ColorDrawable dim = new ColorDrawable(Color.BLACK);
+        private ValueAnimator dimAnim;
+        /** glass_style outline: this tile's own focus outline, and its scale when it hugs the unzoomed tile. */
+        private final View ring;
+        private float ringRestX = 1f, ringRestY = 1f;
         /** A dock tile: it grows in place without advanced_effects' lift, which reads as off-centre in the band (#2135). */
         boolean inDock;
 
         Holder(View v, TileListener listener, boolean animations, boolean advancedEffects,
-               boolean reducedMotion, float restNameAlpha, boolean overshoot) {
+               boolean reducedMotion, float restNameAlpha, boolean overshoot, boolean outline) {
             super(v);
             card = v.findViewById(R.id.card);
             cardBackground = card.getBackground();
@@ -966,7 +1015,32 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             GradientDrawable edge = new GradientDrawable();
             edge.setColor(Color.TRANSPARENT);
             edge.setStroke(Math.max(1, Math.round(density)), 0x26FFFFFF);
-            card.setForeground(edge);
+            dim.setAlpha(REST_DIM);
+            card.setForeground(new LayerDrawable(new Drawable[]{dim, edge}));
+            ViewGroup.LayoutParams cardLp = card.getLayoutParams();
+            if (outline && cardLp.width > 0 && cardLp.height > 0) {
+                float gap = OUTLINE_GAP_DP * density, stroke = OUTLINE_STROKE_DP * density;
+                int out = Math.round(gap + stroke);
+                GradientDrawable outlineDrawable = new GradientDrawable();
+                outlineDrawable.setColor(Color.TRANSPARENT);
+                outlineDrawable.setStroke(Math.round(stroke), OUTLINE_COLOR);
+                // The stroke is centred half a stroke in from the view's edge, so its inner edge sits gap off the tile.
+                outlineDrawable.setCornerRadius(cornerRadius(cardLp.width, density) + gap + stroke / 2f);
+                ring = new View(v.getContext());
+                ring.setBackground(outlineDrawable);
+                ring.forceHasOverlappingRendering(false);
+                ring.setAlpha(0f);
+                FrameLayout.LayoutParams ringLp = new FrameLayout.LayoutParams(cardLp.width + 2 * out,
+                        cardLp.height + 2 * out, Gravity.CENTER_HORIZONTAL | Gravity.TOP);
+                ringLp.topMargin = -out;
+                ViewGroup item = (ViewGroup) v;
+                item.addView(ring, item.indexOfChild(card) + 1, ringLp);
+                // Appearing, the outline opens out from the tile's edge to its place.
+                ringRestX = (cardLp.width + 2 * stroke) / (cardLp.width + 2f * out);
+                ringRestY = (cardLp.height + 2 * stroke) / (cardLp.height + 2f * out);
+            } else {
+                ring = null;
+            }
             card.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) ->
                     edge.setCornerRadius(cornerRadius(r - l, density)));
 
@@ -979,55 +1053,59 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             });
 
             card.setOnFocusChangeListener((view, focused) -> {
-                view.animate().cancel();
-                banner.animate().cancel();
+                // No zoom: the tile stays put and only brightens, the ring slides onto it (MainActivity).
                 name.animate().cancel();
-                float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
-                float s = focused ? scale : 1f;
-                if (!animations) {
-                    view.setScaleX(1f);
-                    view.setScaleY(1f);
-                    view.setTranslationY(0f);
-                    view.setTranslationZ(0f);
-                    banner.setScaleX(1f);
-                    banner.setScaleY(1f);
-                    name.setAlpha(focused ? 1f : restNameAlpha);
-                    name.setTranslationY(0f);
-                } else if (reducedMotion) {
-                    // A short zoom with no hardware layer: building a layer for so short an animation costs more
-                    // frames than it saves. The name just appears instead of fading.
-                    view.animate().scaleX(s).scaleY(s)
-                            .translationY(focused && advancedEffects && !inDock ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
-                            .setDuration(focused ? Motion.REDUCED_MS : 60)
-                            .setInterpolator(new DecelerateInterpolator())
-                            .start();
-                    name.setAlpha(focused ? 1f : restNameAlpha);
-                    // Same place as the full motion's slide ends: the layout's -6dp is only its starting point, and
-                    // left there the name overlaps the zoomed tile.
-                    // Only on focus: snapping it back to -6dp while it fades out would jump it up over the tile.
-                    if (focused) name.setTranslationY(density * 4f);
-                } else {
-                    view.animate().scaleX(s).scaleY(s)
-                            .translationY(focused && advancedEffects && !inDock ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
-                            .setDuration(advancedEffects ? (focused ? 220 : 170) : (focused ? 260 : 180))
-                            .setInterpolator(focused && !overshoot ? new DecelerateInterpolator(1.5f)
-                                    : new OvershootInterpolator(focused ? (advancedEffects ? 0.7f : 1.6f) : 0f))
-                            .withLayer().start();
-                    if (advancedEffects) {
-                        banner.animate().scaleX(focused ? 1.035f : 1f).scaleY(focused ? 1.035f : 1f)
-                                .setDuration(280).start();
-                    }
-                    name.animate().alpha(focused ? 1f : restNameAlpha)
-                            .translationY(focused ? density * 4f : -density * 6f)
-                            .setDuration(220).start();
-                }
+                boolean motion = animations && !reducedMotion;
+                showFocus(focused, motion);
+                name.setTranslationY(0f);
+                if (motion) name.animate().alpha(focused ? 1f : restNameAlpha).setDuration(FOCUS_MS).start();
+                else name.setAlpha(focused ? 1f : restNameAlpha);
                 int pos = getBindingAdapterPosition();
                 if (focused && listener != null && pos != RecyclerView.NO_POSITION) {
                     listener.onTileFocused(pos, view);
                 }
             });
+        }
+
+        void showFocus(boolean focused, boolean animate) {
+            setDimmed(!focused, animate);
+            if (ring == null) return;
+            card.animate().cancel();
+            ring.animate().cancel();
+            float scale = focused ? OUTLINE_SCALE : 1f;
+            if (!animate) {
+                card.setScaleX(scale);
+                card.setScaleY(scale);
+                ring.setScaleX(scale);
+                ring.setScaleY(scale);
+                ring.setAlpha(focused ? 1f : 0f);
+                return;
+            }
+            card.animate().scaleX(scale).scaleY(scale).setDuration(FOCUS_MS).setInterpolator(EASE).start();
+            if (focused) {
+                ring.setScaleX(ringRestX);
+                ring.setScaleY(ringRestY);
+                ring.animate().alpha(1f).scaleX(scale).scaleY(scale).setDuration(180).setInterpolator(EASE).start();
+            } else {
+                // The old outline just fades where it is: nothing travels between tiles.
+                ring.animate().alpha(0f).setDuration(90).setInterpolator(new DecelerateInterpolator()).start();
+            }
+        }
+
+        private static final Interpolator EASE = new PathInterpolator(0.2f, 0f, 0f, 1f);
+
+        void setDimmed(boolean dimmed, boolean animate) {
+            int target = dimmed ? REST_DIM : 0;
+            if (dimAnim != null) dimAnim.cancel();
+            if (!animate) {
+                dim.setAlpha(target);
+                return;
+            }
+            dimAnim = ValueAnimator.ofInt(dim.getAlpha(), target);
+            dimAnim.setDuration(FOCUS_MS);
+            dimAnim.setInterpolator(new DecelerateInterpolator());
+            dimAnim.addUpdateListener(a -> dim.setAlpha((int) a.getAnimatedValue()));
+            dimAnim.start();
         }
     }
 }

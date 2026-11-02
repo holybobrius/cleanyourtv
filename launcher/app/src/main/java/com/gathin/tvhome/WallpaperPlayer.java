@@ -96,6 +96,86 @@ final class WallpaperPlayer {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             showFirst();
         }
+        // videos/ (or wallpaper.mp4): a looping video instead of the picture, picked from the menu (selectBackground).
+        videos = VideoWallpaper.list(context, config);
+        videoNames = videos.isEmpty() ? Collections.emptyMap() : WallpaperCaptions.read(videos.get(0).getParentFile());
+        video = videos.isEmpty() ? null : new VideoWallpaper(context, root, config.wallpaperDim);
+        if (video != null) applyBackground();
+    }
+
+    /** The theme's video wallpapers, and the video player when there are any (else null). */
+    private final List<File> videos;
+    private final Map<String, String> videoNames;
+    private final VideoWallpaper video;
+    /** The background picked in the menu: a video's file name, or PICTURE. Unset is the first video. */
+    private static final String KEY_BACKGROUND = "background", PICTURE = "-";
+
+    /** The backgrounds to pick from: each video by its caption (or file name), then the picture if there is one. */
+    List<String> backgroundNames(String pictureName) {
+        List<String> names = new ArrayList<>();
+        for (File f : videos) names.add(videoName(f));
+        if (!videos.isEmpty() && !files.isEmpty()) names.add(pictureName);
+        return names;
+    }
+
+    int backgroundIndex() {
+        File v = selectedVideo();
+        return v == null ? videos.size() : videos.indexOf(v);
+    }
+
+    void selectBackground(int index) {
+        if (video == null || index < 0) return;
+        String name = index < videos.size() ? videos.get(index).getName() : PICTURE;
+        File before = selectedVideo();
+        preferences.edit().putString(KEY_BACKGROUND, name).apply();
+        File after = selectedVideo();
+        if (before == null ? after == null : before.equals(after)) return;
+        if (before != null && after != null) {
+            video.crossfadeTo(after);
+        } else if (after == null) {
+            // Video to picture: the picture fades in over the video, then the video goes.
+            image.animate().cancel();
+            image.setAlpha(0f);
+            image.setVisibility(View.VISIBLE);
+            image.animate().alpha(1f).setDuration(VideoWallpaper.FADE_MS)
+                    .withEndAction(() -> {
+                        if (selectedVideo() == null) video.show(null);
+                    }).start();
+        } else {
+            // Picture to video: the video's first frame is put under the picture, which then fades away onto it.
+            video.prepareUnder(after, () -> image.animate().alpha(0f).setDuration(VideoWallpaper.FADE_MS)
+                    .withEndAction(() -> {
+                        if (selectedVideo() != null) {
+                            image.setVisibility(View.GONE);
+                            image.setAlpha(1f);
+                        }
+                    }).start());
+            root.setBackground(null);
+            if (active) video.start();
+        }
+    }
+
+    private File selectedVideo() {
+        String chosen = preferences.getString(KEY_BACKGROUND, null);
+        if (PICTURE.equals(chosen) && !files.isEmpty()) return null;
+        for (File f : videos) if (f.getName().equals(chosen)) return f;
+        return videos.get(0);
+    }
+
+    /** The picked video plays and the picture goes; or the picture comes back and the video goes. */
+    private void applyBackground() {
+        File v = selectedVideo();
+        video.show(v);
+        image.setVisibility(v == null ? View.VISIBLE : View.GONE);
+        if (v != null) root.setBackground(null);
+        if (active) video.start();
+    }
+
+    private String videoName(File f) {
+        String caption = videoNames.get(f.getName());
+        if (caption != null) return caption;
+        String base = f.getName().replaceFirst("\\.[^.]+$", "").replace('-', ' ').replace('_', ' ').trim();
+        return base.isEmpty() ? f.getName() : Character.toUpperCase(base.charAt(0)) + base.substring(1);
     }
 
     /**
@@ -130,15 +210,18 @@ final class WallpaperPlayer {
 
     void start() {
         active = true;
+        if (video != null) video.start();
         update();
     }
 
     void stop() {
         active = false;
+        if (video != null) video.stop();
     }
 
     /** Drops the wallpaper texture when Home is hidden and Android asks the process to free memory. */
     void releaseForMemoryPressure() {
+        if (video != null) video.release();
         if (current == null) return;
         image.setImageDrawable(null);
         // The renderer may still have a queued frame that references this hardware bitmap. Drop our references and
@@ -162,6 +245,7 @@ final class WallpaperPlayer {
     void close() {
         active = false;
         closed = true;
+        if (video != null) video.close();
         decoder.shutdownNow();
     }
 

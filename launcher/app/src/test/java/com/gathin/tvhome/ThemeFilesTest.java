@@ -14,6 +14,7 @@ public class ThemeFilesTest {
     @Test public void themeFilesAreAllowed() {
         assertEquals("config.json", ThemeFiles.path(Collections.singletonList("config.json")));
         assertEquals("wallpaper.jpg", ThemeFiles.path(Collections.singletonList("wallpaper.jpg")));
+        assertEquals("wallpaper.mp4", ThemeFiles.path(Collections.singletonList("wallpaper.mp4")));
         assertEquals("theme_revision", ThemeFiles.path(Collections.singletonList("theme_revision")));
     }
 
@@ -45,8 +46,15 @@ public class ThemeFilesTest {
     }
 
     @Test public void onlyTheBareFolderIsTheCollection() {
-        assertTrue(ThemeFiles.isCollection(Collections.singletonList("wallpapers")));
-        assertFalse(ThemeFiles.isCollection(Arrays.asList("wallpapers", "dusk.jpg")));
-        assertFalse(ThemeFiles.isCollection(Collections.singletonList("config.json")));
+        assertEquals("wallpapers", ThemeFiles.collection(Collections.singletonList("wallpapers")));
+        assertEquals("avatars", ThemeFiles.collection(Collections.singletonList("avatars")));
+        assertNull(ThemeFiles.collection(Arrays.asList("wallpapers", "dusk.jpg")));
+        assertNull(ThemeFiles.collection(Collections.singletonList("config.json")));
+    }
+
+    @Test public void avatarsTakeImagesOnly() {
+        assertEquals("avatars/kris.png", ThemeFiles.path(Arrays.asList("avatars", "kris.png")));
+        assertNull(ThemeFiles.path(Arrays.asList("avatars", "captions.txt")));
+        assertNull(ThemeFiles.path(Arrays.asList("avatars", "../config.png")));
     }
 }

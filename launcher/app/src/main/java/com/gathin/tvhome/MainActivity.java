@@ -94,7 +94,7 @@ import java.util.Set;
 /**
  * tvOS style home: black, a pinned dock row, an app grid, and one glass highlight that springs between tiles.
  */
-public class MainActivity extends Activity implements AppAdapter.TileListener {
+public class MainActivity extends Activity implements AppAdapter.TileListener, AppListOverlay.Host {
     @Override
     protected void attachBaseContext(android.content.Context base) {
         super.attachBaseContext(LauncherLocale.wrap(base));   // locale
@@ -270,6 +270,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private DockDecoration dockDecoration;
     /** fullGrid: that gap on Home, which keeps the first grid row past the bottom edge. */
     private int dockGapPx;
+    /** fullGrid: every app as a list, opened by Down from the dock instead of the grid. */
+    private AppListOverlay appList;
+    /** minimal_header: the one-row header with the menu button and the account's picture; null otherwise. */
+    private MinimalHeader minimalHeader;
+    private List<String> accountProfiles = Collections.emptyList();
+    /** The last VPN state updateVpnPill saw, for the menu's VPN row. */
+    private boolean vpnUp;
+    private static final int ACCOUNT_REQUEST = 43;
+    private static final String KEY_HEADER_ACCOUNT = "header_account";
     /** fullGrid: the grid is showing, the header is hidden. */
     private boolean inGrid;
     /** fullGrid: where the dock row's item sits under the top edge while the grid is showing. */
@@ -496,6 +505,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         festive = festival.active(LocalDate.now());
         liveTvPkg = cfg.liveTvPackage;
         idleClockMs = cfg.homeIdleClockMinutes * MINUTE_MS;
+        idleFadeMs = cfg.idleFadeSeconds * 1000L;
         backOpensClock = cfg.backOpensClock;
         bootToLiveTv = cfg.bootToLiveTv;
         openOnStartChoice = cfg.openOnStartChoice;
@@ -524,6 +534,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         sky.setIntensity(cfg.skyIntensity);
         glass = findViewById(R.id.glass);
         glass.setStyle(cfg.glassStyle);
+        // outline: each tile shows its own focus (AppAdapter), so the sliding glass stays out of sight.
+        if (Config.GLASS_OUTLINE.equals(cfg.glassStyle)) glass.setVisibility(View.GONE);
         if (festive) glass.setAccent(festival.accentColor());
         ambient = findViewById(R.id.ambient);
         // The glow is one bitmap, so its alpha can be applied while drawing it. Otherwise every frame of
@@ -828,8 +840,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (reducedMotion) {
                 Motion.reduce(s);
             } else if (!focusOvershoot) {
-                // Critically damped: glides straight onto the tile without swinging past it.
-                s.setSpring(new SpringForce().setStiffness(advancedEffects ? 520f : 440f).setDampingRatio(1f));
+                // Critically damped and quick: the ring lands on the tile in about the time the tile brightens
+                // (AppAdapter.FOCUS_MS), with no swing past it and no lag behind a held key.
+                s.setSpring(new SpringForce().setStiffness(1100f).setDampingRatio(1f));
             } else {
                 s.setSpring(new SpringForce().setStiffness(advancedEffects ? 320f : 260f)
                         .setDampingRatio(advancedEffects ? 0.76f : 0.58f));
@@ -953,6 +966,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         }
         if (festive) applyFestiveSkin((TextView) btnInputs, (TextView) btnSettings);
+        if (cfg.minimalHeader) setUpMinimalHeader(cfg, btnSettings, btnBluetooth);
 
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
@@ -1081,6 +1095,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (openInputsIfAsked(intent)) return;
         if (intent == null || !intent.hasCategory(Intent.CATEGORY_HOME)) return;
         if (gameDay != null && !stopped) gameDay.read();
+        if (appList != null) appList.close(true);
+        if (minimalHeader != null) minimalHeader.closeNow();
+        wakeFromIdle(true);
         grid.scrollToPosition(0);
         lastFocused = 0;
         lastFocusedKey = adapter.getItemCount() > 0 ? adapter.keyAt(0) : null;
@@ -1112,6 +1129,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        if (minimalHeader != null) showProfile();
         // A festival that started or ended while Home was in the background: rebuild with or without it.
         if (festive != festival.active(LocalDate.now())) {
             recreate();
@@ -1184,6 +1202,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == ACCOUNT_REQUEST) {
+            String account = resultCode == RESULT_OK && data != null
+                    ? data.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME) : null;
+            if (account != null) {
+                getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).edit()
+                        .putString(KEY_HEADER_ACCOUNT, account).apply();
+            }
+            if (minimalHeader != null) showProfile();
+            return;
+        }
         if (requestCode == LAUNCHER_SETTINGS_REQUEST && resultCode == RESULT_OK
                 && data != null && data.getBooleanExtra(LauncherSettingsActivity.EXTRA_REORDER, false)) {
             getIntent().putExtra(LauncherSettingsActivity.EXTRA_REORDER, true);
@@ -1322,6 +1350,45 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void restartIdleClock() {
         root.removeCallbacks(showIdleClock);
         if (resumed && idleClockMs > 0) root.postDelayed(showIdleClock, idleClockMs);
+        root.removeCallbacks(fadeIdle);
+        if (resumed && idleFadeMs > 0 && minimalHeader != null) root.postDelayed(fadeIdle, idleFadeMs);
+    }
+
+    /** idle_fade_seconds: how long Home waits for a key before fading to its date and time. */
+    private long idleFadeMs;
+    /** Faded: the next key only wakes Home; its UP (wakeKey) is swallowed too. */
+    private boolean idleFaded;
+    private int wakeKey = KeyEvent.KEYCODE_UNKNOWN;
+    private final Runnable fadeIdle = this::fadeToIdle;
+
+    /** The views the idle fade takes away: the tiles and the header's buttons. */
+    private View[] idleViews() {
+        return new View[]{(View) grid.getParent(), minimalHeader.buttons()};
+    }
+
+    private void fadeToIdle() {
+        boolean busy = !resumed || openPopup != null || reordering || minimalHeader.isMenuOpen()
+                || appList != null && appList.isOpen();
+        if (busy) {
+            restartIdleClock();
+            return;
+        }
+        idleFaded = true;
+        for (View v : idleViews()) {
+            v.animate().cancel();
+            v.animate().alpha(0f).setDuration(animations && !reducedMotion ? 900 : 0).start();
+        }
+    }
+
+    /** Back from the idle fade; instant brings everything back without the animation (Home left, Home pressed). */
+    private void wakeFromIdle(boolean instant) {
+        if (!idleFaded) return;
+        idleFaded = false;
+        for (View v : idleViews()) {
+            v.animate().cancel();
+            if (instant || !animations || reducedMotion) v.setAlpha(1f);
+            else v.animate().alpha(1f).setDuration(250).start();
+        }
     }
 
     @Override
@@ -1333,6 +1400,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         RemoteKeys.release(this);
         cancelHoldOk();
         root.removeCallbacks(showIdleClock);
+        root.removeCallbacks(fadeIdle);
+        wakeFromIdle(true);   // an app opened from Home comes back to the whole Home, not to the faded one
         endReorder();   // Home or another app while reordering keeps the order so far
         wallpaperPlayer.stop();
         stopAmbientAnimation();
@@ -1448,6 +1517,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // Faded to the date and time: the first key only brings Home back, so it cannot open something unseen.
+        if (idleFaded && event.getAction() == KeyEvent.ACTION_DOWN) {
+            wakeKey = event.getKeyCode();
+            wakeFromIdle(false);
+            return true;
+        }
+        if (wakeKey != KeyEvent.KEYCODE_UNKNOWN && event.getKeyCode() == wakeKey) {
+            if (event.getAction() == KeyEvent.ACTION_UP) wakeKey = KeyEvent.KEYCODE_UNKNOWN;
+            return true;
+        }
         // Vendor keys (TCL Netflix button, 4062) never reach the key services, only the focused window, so their
         // "hold:" entries run here too or nowhere. Only while resumed: onPause releases Home's holds, and a DOWN
         // taken after that would arm one nothing releases.
@@ -1783,6 +1862,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        if (minimalHeader != null && minimalHeader.isMenuOpen()) {
+            minimalHeader.back();
+            return;
+        }
+        if (appList != null && appList.isOpen()) {
+            appList.close(false);
+            return;
+        }
         // fullGrid: Back from the grid returns to the dock tile in the same column.
         if (inGrid) {
             focusTile(lastFocused % COLUMNS);
@@ -1921,6 +2008,132 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             revealRect.set(0, -(int) pad * 2, item.getWidth(), item.getHeight() + (int) pad);
             grid.requestChildRectangleOnScreen(item, revealRect, reducedMotion);
         }
+    }
+
+    /** fullGrid: Down from the dock: Home's header and dock give way to the list of every app. */
+    /**
+     * minimal_header: the greeting, the date lines and the row of pills give way to one row (MinimalHeader). The pills
+     * stay, hidden, so the menu's rows run exactly what they ran.
+     */
+    private void setUpMinimalHeader(Config cfg, View btnSettings, View btnBluetooth) {
+        findViewById(R.id.leftBlock).setVisibility(View.GONE);
+        findViewById(R.id.stats).setVisibility(View.GONE);
+        findViewById(R.id.topButtons).setVisibility(View.GONE);
+        accountProfiles = cfg.accountProfiles;
+        minimalHeader = new MinimalHeader(this, findViewById(R.id.header), root, new MinimalHeader.Host() {
+            @Override public void onHeaderDown() {
+                focusTile(singleRow ? lastFocused : lastFocused % COLUMNS);
+            }
+
+            @Override public void onAccountButton() {
+                chooseAccount();
+            }
+        }, animations && !reducedMotion);
+        List<MinimalHeader.Item> items = new ArrayList<>();
+        items.add(new MinimalHeader.Item(R.drawable.ic_input, getString(R.string.inputs), null, this::showInputs, false));
+        items.add(new MinimalHeader.Item(R.drawable.ic_wifi, getString(R.string.wifi), () -> {
+            CharSequence network = wifiIconOnly ? btnWifi.getContentDescription() : btnWifi.getText();
+            return network == null || getString(R.string.wifi).contentEquals(network) ? null : network.toString();
+        }, this::openNetworkPill, false));
+        items.add(new MinimalHeader.Item(R.drawable.ic_bluetooth, getString(R.string.bluetooth), () -> {
+            android.bluetooth.BluetoothAdapter bt = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+            if (bt == null) return null;
+            try {
+                return getString(bt.isEnabled() ? R.string.on : R.string.off);
+            } catch (SecurityException e) {
+                return null;
+            }
+        }, btnBluetooth::performClick, false));
+        if (vpnPill) {
+            items.add(new MinimalHeader.Item(R.drawable.ic_vpn_shield_on, getString(R.string.vpn),
+                    () -> getString(vpnUp ? R.string.on : R.string.off), this::openVpnPill, false));
+        }
+        // Background: the theme's videos and its picture, when there is more than one to pick from.
+        List<String> backgrounds = wallpaperPlayer.backgroundNames(getString(R.string.wallpaper_picture));
+        if (backgrounds.size() > 1) {
+            items.add(new MinimalHeader.Item(R.drawable.ic_wallpaper, getString(R.string.background), () -> {
+                int i = wallpaperPlayer.backgroundIndex();
+                return i >= 0 && i < backgrounds.size() ? backgrounds.get(i) : null;
+            }, null, true, new MinimalHeader.Chooser() {
+                @Override public List<String> names() {
+                    return backgrounds;
+                }
+
+                @Override public int selected() {
+                    return wallpaperPlayer.backgroundIndex();
+                }
+
+                @Override public void pick(int index) {
+                    wallpaperPlayer.selectBackground(index);
+                }
+            }));
+        }
+        items.add(new MinimalHeader.Item(R.drawable.ic_apps_pill, getString(R.string.all_apps), null, () -> {
+            if (fullGrid) openAppList();
+            else onLibraryRequested();
+        }, true));
+        items.add(new MinimalHeader.Item(R.drawable.ic_settings, getString(R.string.settings), null,
+                btnSettings::performClick, false));
+        minimalHeader.setItems(items);
+        showProfile();
+    }
+
+    /** The account button's name and picture for the signed-in Google account (Profiles). */
+    private void showProfile() {
+        String chosen = getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).getString(KEY_HEADER_ACCOUNT, null);
+        Profiles.Profile p = Profiles.current(this, accountProfiles, chosen);
+        String key = p.account + "|" + p.name + "|" + p.picture;
+        if (key.equals(shownProfile)) return;
+        shownProfile = key;
+        minimalHeader.setProfile(p.name, Profiles.circle(Config.dir(this), p.picture, Math.round(64 * density)));
+    }
+
+    private String shownProfile;
+
+    /**
+     * Android's account chooser. Picking an account there is also what lets the launcher see it: until then a
+     * Google account is hidden from apps, and the header shows the theme's first profile.
+     */
+    private void chooseAccount() {
+        String chosen = getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).getString(KEY_HEADER_ACCOUNT, null);
+        android.accounts.Account selected = chosen != null ? new android.accounts.Account(chosen, Profiles.GOOGLE) : null;
+        Intent pick = android.accounts.AccountManager.newChooseAccountIntent(selected, null,
+                new String[]{Profiles.GOOGLE}, null, null, null, null);
+        try {
+            startActivityForResult(pick, ACCOUNT_REQUEST);
+        } catch (ActivityNotFoundException e) {
+            open(systemIntent(Settings.ACTION_SYNC_SETTINGS));
+        }
+    }
+
+    private void openAppList() {
+        if (appList == null) appList = new AppListOverlay(this, root, adapter, this, animations && !reducedMotion);
+        appListDock = lastFocused % COLUMNS;
+        View content = (View) findViewById(R.id.header).getParent();
+        content.animate().cancel();
+        content.animate().alpha(0f).setDuration(animations && !reducedMotion ? 200 : 0).start();
+        appList.open();
+    }
+
+    /** The dock column the list was opened from, focused again when it closes. */
+    private int appListDock;
+
+    @Override
+    public void onListLaunch(int position) {
+        adapter.launchAt(position);
+    }
+
+    @Override
+    public void onListMenu(int position, View anchor) {
+        showTileMenu(position, anchor, false);
+    }
+
+    @Override
+    public void onListClosed() {
+        View content = (View) findViewById(R.id.header).getParent();
+        content.animate().cancel();
+        content.animate().alpha(1f).setDuration(animations && !reducedMotion ? 200 : 0).start();
+        focusTile(appListDock);
     }
 
     /** fullGrid: hides the header while the whole grid shows, and brings it back with the dock. */
@@ -2514,6 +2727,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return GridNavigation.atHorizontalEdge(position, rowCount, COLUMNS,
                     rtlAppGrid, keyCode == KeyEvent.KEYCODE_DPAD_LEFT);
         }
+        if (fullGrid && keyCode == KeyEvent.KEYCODE_DPAD_DOWN && position < COLUMNS) {
+            openAppList();
+            return true;
+        }
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
             if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
             target = position - COLUMNS;
@@ -2764,7 +2981,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void updateClockVisibility() {
         boolean valid = System.currentTimeMillis() >= TIME_VALID_AFTER_MS;
-        clockBlock.setVisibility(valid ? View.VISIBLE : View.INVISIBLE);
+        // minimal_header keeps the old date and greeting block out for good.
+        clockBlock.setVisibility(minimalHeader != null ? View.GONE : valid ? View.VISIBLE : View.INVISIBLE);
         handler.removeCallbacks(clockCheck);
         if (valid) {
             updateGreeting();
@@ -3215,6 +3433,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** vpn_pill: the pill outlined in green with a lock while a VPN is up, outlined in red "VPN off" while it is not;
      *  solid with a white ring only while focused. */
     private void updateVpnPill(boolean vpn) {
+        vpnUp = vpn;
         int state = VpnBadge.pillState(vpn, vpnAppIntent() != null);
         if (state == VpnBadge.PILL_HIDDEN) {
             if (btnVpn.getVisibility() == View.GONE) return;
@@ -3471,7 +3690,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // Read the switch, not the pill: show_inputs_pill=false hides the pill too, and there the list
         // keeps its usual place.
         boolean underGear = topMenu;
-        View anchor = findViewById(underGear ? R.id.btnSettings : R.id.btnInputs);
+        View anchor = minimalHeader != null ? minimalHeader.menuButton()
+                : findViewById(underGear ? R.id.btnSettings : R.id.btnInputs);
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
 
@@ -3660,7 +3880,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         popup.setWidth(Math.max(width, Math.min(panel.getMeasuredWidth(), (int) (360 * density))));
 
-        int alignment = getResources().getBoolean(R.bool.rtl_menu_bar) != underGear ? Gravity.END : Gravity.START;
+        int alignment = minimalHeader != null ? Gravity.END
+                : getResources().getBoolean(R.bool.rtl_menu_bar) != underGear ? Gravity.END : Gravity.START;
         dropIn(popup, panel, anchor, alignment);
         for (int i = 0; i < rows.getChildCount(); i++) {
             View child = rows.getChildAt(i);
@@ -3890,6 +4111,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public void onTileLongPress(int position, View card) {
+        showTileMenu(position, card, true);
+    }
+
+    /** The tile menu; from the all-apps list (onHome false) only the rows that need no tile on screen. */
+    private void showTileMenu(int position, View card, boolean onHome) {
         if (reordering || openPopup != null) return;
         String key = adapter.keyAt(position);
         String pkg = adapter.packageAt(position);
@@ -3898,12 +4124,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
         PopupWindow popup = glassPopup(panel, (int) (200 * density));
-        if (dockRow && position < adapter.movableCount()) {
+        if (onHome && dockRow && position < adapter.movableCount()) {
             boolean inDock = position < COLUMNS;
             addSettingsMenuRow(rows, popup, inDock ? R.string.tile_replace_in_dock : R.string.tile_add_to_dock,
                     () -> startDockEditFor(key, inDock));
         }
-        if (position < adapter.movableCount()) addSettingsMenuRow(rows, popup, R.string.tile_move, () -> {
+        if (onHome && position < adapter.movableCount()) addSettingsMenuRow(rows, popup, R.string.tile_move, () -> {
             if (!beginReorder()) return;
             int at = adapter.positionOf(key);   // beginReorder can rebuild the tiles
             if (at < 0) return;

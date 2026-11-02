@@ -282,6 +282,21 @@
          the app says disconnected (it holds the tunnel to block traffic), so the pill stays green then. Can also be
          set with "vpn_pill" in a theme. -->
     <bool name="vpn_pill">false</bool>
+
+    <!-- The header as one row: a round menu button on the left (Inputs, Wi-Fi, Bluetooth, VPN, All apps and Settings
+         in a side panel), the date and time in the middle and the Google account's picture on the right. The greeting
+         and the row of pills go. Set with "minimal_header" in a theme. -->
+    <bool name="minimal_header">false</bool>
+
+    <!-- minimal_header: the account button's name and picture, one "account|name|picture" line per Google account.
+         The account is the address or the part before the @; the picture is a file in the theme's avatars/ folder.
+         The first line is shown while no account can be read. Set with "account_profiles" in a theme. -->
+    <string-array name="account_profiles" translatable="false" />
+
+    <!-- minimal_header: after this many seconds without a key, everything but the date and time fades out and Home
+         turns into a screensaver over its wallpaper; the next key only brings it back. 0 never fades. Set with
+         "idle_fade_seconds" in a theme. -->
+    <integer name="idle_fade_seconds">0</integer>
     <!-- The dock as its own row: a lighter band, no names under the tiles, parked low on the screen with the top
          shelf above it. false makes the dock apps simply the first tiles of one plain grid (still in dock_apps
          order, no empty slots), with names under every tile and the glow behind every focused tile. -->
