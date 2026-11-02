@@ -940,6 +940,13 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 }
             });
             card.setClipToOutline(true);
+            // A faint white edge so a dark tile still stands off a dark wallpaper; its corners follow the tile's.
+            GradientDrawable edge = new GradientDrawable();
+            edge.setColor(Color.TRANSPARENT);
+            edge.setStroke(Math.max(1, Math.round(density)), 0x2EFFFFFF);
+            card.setForeground(edge);
+            card.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) ->
+                    edge.setCornerRadius(cornerRadius(r - l, density)));
 
             card.setOnKeyListener((view, keyCode, event) -> {
                 if (event.getAction() != KeyEvent.ACTION_DOWN) return false;

@@ -23,7 +23,7 @@
     <string name="not_available">Недоступно на этом телевизоре</string>
     <string name="cant_open">Не удалось открыть %1$s</string>
     <string name="date_format">EEEE, d MMMM</string>
-    <string name="date_format_home">EEEE\nd MMMM</string>
+    <string name="date_format_home">EEEE, d MMMM</string>
     <string name="shamsi_month_farvardin">фарвардина</string>
     <string name="shamsi_month_ordibehesht">ордибехешта</string>
     <string name="shamsi_month_khordad">хордада</string>

@@ -29,6 +29,9 @@ public class GlassView extends View {
     /** glass_style rim or halo: no sheen and no fill, only the crisp rim (and, for halo, a lighter outer glow). */
     private boolean flat;
     private boolean halo;
+    /** glass_style ring: a white ring a few dp outside the tile, with no glow. */
+    private boolean ring;
+    private static final int RING_ARGB = 0xF2FFFFFF;
 
     public GlassView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -46,7 +49,9 @@ public class GlassView extends View {
 
     /** Tints the rim and the outer glow; 0 restores the plain white glass. */
     void setAccent(int argb) {
-        if (argb == 0) {
+        if (ring && argb == 0) {
+            rim.setColor(RING_ARGB);
+        } else if (argb == 0) {
             glowRgb = 0xFFFFFF;
             glowAlpha = 0x30;
             rim.setColor(0xCCFFFFFF);
@@ -65,8 +70,18 @@ public class GlassView extends View {
     void setStyle(String style) {
         flat = Config.GLASS_RIM.equals(style) || Config.GLASS_HALO.equals(style);
         halo = Config.GLASS_HALO.equals(style);
-        rim.setStrokeWidth((flat ? 2f : 1.5f) * density);
+        ring = Config.GLASS_RING.equals(style);
+        if (ring) {
+            flat = true;
+            rim.setColor(RING_ARGB);
+        }
+        rim.setStrokeWidth((ring ? 3f : flat ? 2f : 1.5f) * density);
         invalidate();
+    }
+
+    /** Room on every side between the view's edge and the zoomed tile under it, for the glow (and the ring's gap). */
+    float insetPx() {
+        return (ring ? 10f : 6f) * density;
     }
 
     void setRadius(float px) {
@@ -83,8 +98,15 @@ public class GlassView extends View {
 
     @Override
     protected void onDraw(Canvas canvas) {
-        float inset = 6f * density;   // room for the glow
+        float inset = insetPx();   // room for the glow
         rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
+        if (ring) {
+            // The ring sits 5dp outside the tile, concentric with its corners.
+            float gap = 5f * density, r = radius + gap;
+            rect.inset(-gap, -gap);
+            canvas.drawRoundRect(rect, r, r, rim);
+            return;
+        }
 
         // Outer glow: thin rings across the inset, each a little fainter, so it fades out smoothly. Three wide
         // strokes left visible bands once the glow took an app's colour at a stronger alpha. The hardware layer

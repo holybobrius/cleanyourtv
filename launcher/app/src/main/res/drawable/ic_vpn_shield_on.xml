@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- icon_only_vpn: a shield with a check, and a status dot (green while a VPN is up, red while none is). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp" android:height="22dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="@color/pill_ink"
+        android:pathData="M12,2L4,5v6.09c0,5.05 3.41,9.76 8,10.91c4.59,-1.15 8,-5.86 8,-10.91V5L12,2zM18,11.09c0,4 -2.55,7.7 -6,8.83c-3.45,-1.13 -6,-4.82 -6,-8.83v-4.7l6,-2.25l6,2.25V11.09z" />
+    <path android:fillColor="@color/pill_ink"
+        android:pathData="M8.82,10.59L7.4,12l3.54,3.54l5.66,-5.66l-1.41,-1.41l-4.24,4.24L8.82,10.59z" />
+    <path android:fillColor="#FF34C759"
+        android:pathData="M20,17.5m-3.2,0a3.2,3.2 0,1 1,6.4 0a3.2,3.2 0,1 1,-6.4 0" />
+</vector>
