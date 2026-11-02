@@ -24,3 +24,5 @@ launcher/replay_pid*.log
 
 # Personal setup for one TV (debloat list, theme, wallpapers, backups) stays local
 mytv/
+# Home default ships without a wallpaper; a local one stays out of git
+themes/home-default/wallpaper.jpg

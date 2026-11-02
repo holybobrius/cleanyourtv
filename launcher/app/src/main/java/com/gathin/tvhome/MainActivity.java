@@ -261,6 +261,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private boolean dockRow;
     /** config single_row: every app in the dock's row, scrolling sideways, no grid below. */
     private boolean singleRow;
+    /**
+     * rows_below_dock 0 with a dock row: Home shows the header and the dock only, and Down from the dock slides the
+     * header away and shows the whole grid (setGridMode). Up from its first row or Back returns to the dock.
+     */
+    private boolean fullGrid;
+    /** fullGrid: the dock's decoration, whose gap below the dock closes while the grid shows. */
+    private DockDecoration dockDecoration;
+    /** fullGrid: that gap on Home, which keeps the first grid row past the bottom edge. */
+    private int dockGapPx;
+    /** fullGrid: the grid is showing, the header is hidden. */
+    private boolean inGrid;
+    /** fullGrid: where the dock row's item sits under the top edge while the grid is showing. */
+    private static final float GRID_TOP_DP = 24f;
     /** The highlight springs past its target (config.xml, focus_overshoot); false goes straight there. */
     private boolean focusOvershoot;
     /** Festive skin from the theme (see Festival); applied while it is active today. */
@@ -477,6 +490,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         reducedMotion = cfg.reducedMotion;
         dockRow = cfg.dockRow;
         singleRow = cfg.singleRow;
+        fullGrid = cfg.dockRow && !singleRow && cfg.rowsBelowDock == 0;
         focusOvershoot = cfg.focusOvershoot;
         festival = cfg.festival;
         festive = festival.active(LocalDate.now());
@@ -685,7 +699,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             DockDecoration dock = new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames, cfg.dockOpacity, cfg.dockGlass, cfg.dockEvenPadding, cfg.dockBand,
                     singleRow, cfg.dockBandAll);
             // rows_below_dock 0: the row under the dock waits past the screen's bottom edge instead of peeking in.
-            if (cfg.rowsBelowDock == 0) dock.setExtraBottom(Math.round(56 * density));
+            if (cfg.rowsBelowDock == 0) {
+                dockGapPx = Math.round(56 * density);
+                dock.setExtraBottom(dockGapPx);
+                dockDecoration = dock;
+            }
             grid.addItemDecoration(dock);
         }
         if (cfg.fadeRows) TopFade.attach(grid, 48 * density);
@@ -708,7 +726,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             int h = b - t;
             // Item height follows the tile size, which follows the columns and the rows that must fit (AppAdapter.tileWidthPx).
             int inner = (r - l) - grid.getPaddingLeft() - grid.getPaddingRight();
-            int tileW = AppAdapter.tileWidthPx(inner, h, COLUMNS, rowsBelowDock, cfg.dockTitle, cfg.dockRow, density);
+            int tileW = AppAdapter.compactTiles(singleRow, cfg.dockRow, rowsBelowDock) ? AppAdapter.singleRowTileWidthPx(inner, COLUMNS, density)
+                    : AppAdapter.tileWidthPx(inner, h, COLUMNS, rowsBelowDock, cfg.dockTitle, cfg.dockRow, density);
             int itemH = AppAdapter.itemHeightPx(AppAdapter.tileHeightPx(tileW), density);
             int dockRow = itemH + (int) (AppAdapter.DOCK_EXTRA_DP * density);   // item height plus DockDecoration offsets
             int gridRows = itemH * rowsBelowDock;
@@ -1764,6 +1783,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        // fullGrid: Back from the grid returns to the dock tile in the same column.
+        if (inGrid) {
+            focusTile(lastFocused % COLUMNS);
+            return;
+        }
         // Home screen: Back goes nowhere, unless back_opens_clock is on.
         if (backOpensClock) startActivity(new Intent(this, ClockActivity.class));
     }
@@ -1877,13 +1901,45 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 else grid.smoothScrollBy(0, dy);
             }
             showHero(position, scroll ? r.top - dy : r.top);
+            if (inGrid) setGridMode(false);
         } else {
             // Below the dock (or in a plain grid) the glow follows the tile without the big name; letting it
             // fade out left the grid on plain black.
             showGlowOnly(position);
+            if (fullGrid && !inGrid) {
+                // Down from the dock: the header slides away and the dock row rises to the top of the screen, the
+                // whole grid under it, so every app is in view.
+                setGridMode(true);
+                RecyclerView.ViewHolder dockHolder = grid.findViewHolderForAdapterPosition(0);
+                int top = dockHolder != null ? dockHolder.itemView.getTop() : item.getTop();
+                int dy = top - (int) (GRID_TOP_DP * density);
+                if (!animations || reducedMotion) grid.scrollBy(0, dy);
+                else grid.smoothScrollBy(0, dy);
+                return;
+            }
             // Scroll just enough so the whole glass (not only the tile) is visible.
             revealRect.set(0, -(int) pad * 2, item.getWidth(), item.getHeight() + (int) pad);
             grid.requestChildRectangleOnScreen(item, revealRect, reducedMotion);
+        }
+    }
+
+    /** fullGrid: hides the header while the whole grid shows, and brings it back with the dock. */
+    private void setGridMode(boolean on) {
+        inGrid = on;
+        if (dockDecoration != null) {
+            // The grid follows the dock at the usual row spacing; the glass refits once the rows have moved.
+            dockDecoration.setExtraBottom(on ? 0 : dockGapPx);
+            grid.invalidateItemDecorations();
+            grid.post(this::refitGlass);
+        }
+        View header = findViewById(R.id.header);
+        float y = on ? -(header.getBottom() + 26 * density) : 0f;
+        header.animate().cancel();
+        if (!animations || reducedMotion) {
+            header.setTranslationY(y);
+            header.setAlpha(on ? 0f : 1f);
+        } else {
+            header.animate().translationY(y).alpha(on ? 0f : 1f).setDuration(220).start();
         }
     }
 
@@ -3048,7 +3104,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         pill.setPaddingRelative(pad, 0, pad, 0);
         pill.setCompoundDrawablePadding(0);
         pill.getLayoutParams().width = Math.round(42 * density);
-        pill.setBackgroundColor(Color.TRANSPARENT);
     }
 
     // ---- festive skin ------------------------------------------------------------------------------

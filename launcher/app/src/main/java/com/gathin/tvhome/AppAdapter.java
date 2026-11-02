@@ -114,6 +114,25 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return Math.max(Math.round(80 * density), Math.min(design, fit));
     }
 
+    /** single_row, and a dock with rows_below_dock 0: the gap between two tiles. */
+    static final float SINGLE_ROW_GAP_DP = 14f;
+
+    /** Tiles sized by {@link #singleRowTileWidthPx}: a single row, or a dock row with no grid rows shown under it. */
+    static boolean compactTiles(boolean singleRow, boolean dockRow, int rowsBelowDock) {
+        return singleRow || dockRow && rowsBelowDock == 0;
+    }
+
+    /**
+     * The tile that fills a column minus the gap, so the tiles span the row's width with even gaps instead of
+     * keeping the grid's wide cells (see {@link #compactTiles}). Capped at the design size.
+     */
+    static int singleRowTileWidthPx(int innerWidthPx, int columns, float density) {
+        int design = Math.round(DESIGN_W_DP * density);
+        if (innerWidthPx <= 0 || columns <= 0) return design;
+        int fit = innerWidthPx / columns - Math.round(SINGLE_ROW_GAP_DP * density);
+        return Math.max(Math.round(80 * density), Math.min(design, fit));
+    }
+
     static int tileHeightPx(int tileWidthPx) {
         return Math.round(tileWidthPx * DESIGN_H_DP / DESIGN_W_DP);
     }
@@ -416,7 +435,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         float density = parent.getResources().getDisplayMetrics().density;
         int width = parent.getWidth() > 0 ? parent.getWidth() : parent.getMeasuredWidth();
         int inner = width - parent.getPaddingLeft() - parent.getPaddingRight();
-        int w = tileWidthPx(inner, parent.getHeight(), dockSize, rowsBelowDock, dockTitle, dockRow, density), h = tileHeightPx(w);
+        int w = compactTiles(singleRow, dockRow, rowsBelowDock) ? singleRowTileWidthPx(inner, dockSize, density)
+                : tileWidthPx(inner, parent.getHeight(), dockSize, rowsBelowDock, dockTitle, dockRow, density);
+        int h = tileHeightPx(w);
         View card = v.findViewById(R.id.card);
         ViewGroup.LayoutParams cardLp = card.getLayoutParams();
         cardLp.width = w;
@@ -433,9 +454,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             v.setPadding(v.getPaddingLeft(), pad, v.getPaddingRight(), pad);
         }
         name.setLayoutParams(nameLp);
-        // A sideways row would stretch a match_parent item across the whole screen. Keep a deliberate 18dp
-        // breathing space instead of distributing six cards across the entire display with large empty gaps.
-        if (singleRow) v.getLayoutParams().width = w + Math.round(18f * density);
+        // A sideways row would stretch a match_parent item across the whole screen: the tile plus the row's gap.
+        if (singleRow) v.getLayoutParams().width = w + Math.round(SINGLE_ROW_GAP_DP * density);
         if (uniformTiles) {
             // tvOS-style tile: a large centred mark, no caption inside the card.
             View icon = v.findViewById(R.id.icon);
@@ -945,7 +965,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             // A faint white edge so a dark tile still stands off a dark wallpaper; its corners follow the tile's.
             GradientDrawable edge = new GradientDrawable();
             edge.setColor(Color.TRANSPARENT);
-            edge.setStroke(Math.max(1, Math.round(density)), 0x2EFFFFFF);
+            edge.setStroke(Math.max(1, Math.round(density)), 0x26FFFFFF);
             card.setForeground(edge);
             card.addOnLayoutChangeListener((view, l, t, r, b, ol, ot, or, ob) ->
                     edge.setCornerRadius(cornerRadius(r - l, density)));
