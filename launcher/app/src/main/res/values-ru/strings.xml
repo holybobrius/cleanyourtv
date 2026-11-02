@@ -158,5 +158,7 @@
     <string name="all_apps">Все приложения</string>
     <string name="menu">Меню</string>
     <string name="background">Фон</string>
+    <string name="usb_drive">Флешка</string>
+    <string name="usb_drive_none">Не подключена</string>
     <string name="wallpaper_picture">Картинка</string>
 </resources>

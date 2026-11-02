@@ -148,7 +148,7 @@ A new key needs one there in the same pull request.
 | `dock_opacity` | 30 to 100 | Opacity of the dock's band, in percent, so a wallpaper shows through it; 100 by default (the cinematic shelf keeps its own translucent band). Launcher settings on the TV offers 100, 70, 50 or 30, which wins until the next theme push or Follow theme |
 | `wallpaper_captions` | bool | With a rotating collection, the shown picture's name under the top-right buttons, from `wallpapers/captions.txt` (`001.jpg<TAB>Dusk over the peaks`, one per line); a picture without a line shows no name (`false` by default) |
 | `wallpaper_moods` | object | A rotating collection grouped by time of day: `{"morning": [...], "evening": [...], "night": [...]}` with file names from `wallpapers/`. Morning runs from sunrise to noon, evening until half an hour after sunset, night the rest, with the sun at config.xml's `latitude` and `longitude` (07:00 and 18:30 without them); a missing group rotates through every picture, and so does a group whose names are not the pictures in `wallpapers/` (a renamed picture, a suffix the launcher does not read), since those names are dropped one by one; every group is read by these three names only. Unset by default |
-| `minimal_header` | bool | The header as one row: the date over a large time on the left; a round menu button and the Google account's picture on the right. The menu is a side panel with Inputs, Wi-Fi, Bluetooth, VPN, Background (with videos), All apps and Settings; the greeting and the pills go (`false` by default) |
+| `minimal_header` | bool | The header as one row: the date over a large time on the left; a round menu button and the Google account's picture on the right. The menu is a side panel with Inputs, USB drive (Xiaomi's Media Explorer on its Devices tab), Wi-Fi, Bluetooth, VPN, Background (with videos), All apps and Settings; the greeting and the pills go (`false` by default) |
 | `account_profiles` | list | With `minimal_header`, the account button's name and picture: `"you@gmail.com|Name|you.png"`, the picture in the theme's `avatars/` folder; the account may also be the part before the @. The first line is shown until Android lets the launcher see an account, which picking it once in the chooser (OK on the account button) does. Empty by default |
 | `idle_fade_seconds` | 0 to 3600 | With `minimal_header`, seconds without a key before everything but the date and time fades out; the next key only brings Home back (`0`, never, by default) |
 | `tile_menu` | bool | Hold OK or press the remote's Menu key on a tile to open a small menu: Move, Remove from Home (with `app_library`) and App info. `true` by default since launcher 3.3; `false` keeps holding OK as a shortcut to the app's App info page and leaves Menu unchanged |
@@ -236,6 +236,12 @@ On the TV, Launcher settings has a Wallpaper row: pick one picture from the coll
 default, press Follow theme, or push a theme again.
 
 **Your own walls with `weeb`.** Copy `themes/weeb` to a folder outside this checkout, so pictures you only have for your own use are never committed, put your pictures in its `wallpapers/` folder, then run `tools/theme.sh <that folder>`.
+
+## Tile pictures
+
+Put a picture for an app in the theme's `banners/` folder, named after its package: `banners/com.spotify.tv.android.png`
+(PNG, JPEG or WebP). It replaces the app's own banner on its tile, `uniform_tiles` included. Draw it 16:9, 640×360 or
+larger, with square corners: the launcher rounds them. `adb shell pm list packages` lists the package names.
 
 ## Reduced motion
 

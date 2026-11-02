@@ -2031,6 +2031,19 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, A
         }, animations && !reducedMotion);
         List<MinimalHeader.Item> items = new ArrayList<>();
         items.add(new MinimalHeader.Item(R.drawable.ic_input, getString(R.string.inputs), null, this::showInputs, false));
+        Intent usb = usbDriveIntent();
+        if (usb != null) {
+            items.add(new MinimalHeader.Item(R.drawable.ic_usb_drive, getString(R.string.usb_drive), () -> {
+                String name = usbDriveName();
+                return name != null ? name : getString(R.string.usb_drive_none);
+            }, () -> {
+                try {
+                    startActivity(usb);
+                } catch (ActivityNotFoundException | SecurityException e) {
+                    Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
+                }
+            }, false));
+        }
         items.add(new MinimalHeader.Item(R.drawable.ic_wifi, getString(R.string.wifi), () -> {
             CharSequence network = wifiIconOnly ? btnWifi.getContentDescription() : btnWifi.getText();
             return network == null || getString(R.string.wifi).contentEquals(network) ? null : network.toString();
@@ -2076,6 +2089,28 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, A
                 btnSettings::performClick, false));
         minimalHeader.setItems(items);
         showProfile();
+    }
+
+    /** Xiaomi's Media Explorer on its Devices tab, where a plugged-in drive is the first thing; null without it. */
+    private Intent usbDriveIntent() {
+        Intent i = new Intent(MEDIA_EXPLORER_DEVICES).setPackage(MEDIA_EXPLORER)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        if (getPackageManager().resolveActivity(i, 0) != null) return i;
+        return getPackageManager().getLeanbackLaunchIntentForPackage(MEDIA_EXPLORER);
+    }
+
+    private static final String MEDIA_EXPLORER = "com.xiaomi.mitv.mediaexplorer";
+    /** Opens Media Explorer on tab 0, Devices (BROWSE_VIDEO and BROWSE_MUSIC pick the other tabs). */
+    private static final String MEDIA_EXPLORER_DEVICES = "duokan.mediaexplorer.intent.action.BROWSE_WITH_PATH";
+
+    /** The plugged-in drive's name, as Android shows it ("Netac USB drive"), or null with none mounted. */
+    private String usbDriveName() {
+        android.os.storage.StorageManager sm = getSystemService(android.os.storage.StorageManager.class);
+        if (sm == null) return null;
+        for (android.os.storage.StorageVolume v : sm.getStorageVolumes()) {
+            if (v.isRemovable() && android.os.Environment.MEDIA_MOUNTED.equals(v.getState())) return v.getDescription(this);
+        }
+        return null;
     }
 
     /** The account button's name and picture for the signed-in Google account (Profiles). */

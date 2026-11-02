@@ -10,11 +10,13 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -39,6 +41,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -318,6 +321,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         // Some system apps declare two leanback entry points under one name (Sony's Timers & Clock on the
         // BRAVIA VU31), which would show as two identical tiles: keep the first per package and label.
         Set<String> seen = new HashSet<>();
+        File themeBanners = themeBannerDir();
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
@@ -331,9 +335,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             String label = card != null ? card.label : Cards.cleanLabel(
                     appLabels.containsKey(pkg) ? appLabels.get(pkg) : String.valueOf(ri.loadLabel(pm)), pkg);
             if (!seen.add(pkg + '\n' + label)) continue;
-            Drawable banner = null;
+            // The theme's own picture for the app wins over everything, uniform_tiles included: it was drawn for it.
+            Drawable banner = card == null ? themeBanner(themeBanners, pkg) : null;
             // uniform_tiles draws the icon, so an app's banner is never loaded. A module card keeps its banner.
-            if (!(uniformTiles && card == null)) {
+            if (banner == null && !(uniformTiles && card == null)) {
                 banner = bundledBanner(appBanners.get(pkg));
                 if (banner == null) banner = iconTiles.contains(pkg) ? iconBanner(ri.loadIcon(pm)) : loadBanner(pm, ri);
             }
@@ -390,6 +395,38 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         icon.draw(canvas);
         return new android.graphics.drawable.BitmapDrawable(ctx.getResources(), bmp);
     }
+
+    /** The theme's banners/ folder, or null when it has none (most themes), so no tile looks for a file. */
+    private File themeBannerDir() {
+        File dir = Config.dir(ctx);
+        File banners = dir == null ? null : new File(dir, ThemeFiles.BANNERS);
+        return banners != null && banners.isDirectory() ? banners : null;
+    }
+
+    /**
+     * The theme's picture for this package, banners/&lt;package&gt;.png (or .jpg, .jpeg, .webp), or null. Decoded
+     * no larger than it needs to be for a tile: a 4K plate halves until it is under twice the tile's width.
+     */
+    private Drawable themeBanner(File dir, String pkg) {
+        if (dir == null) return null;
+        for (String ext : BANNER_TYPES) {
+            File f = new File(dir, pkg + ext);
+            if (!f.isFile()) continue;
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), bounds);
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 1;
+            int most = 2 * Math.round(DESIGN_W_DP * ctx.getResources().getDisplayMetrics().density);
+            while (bounds.outWidth / (opts.inSampleSize * 2) >= most) opts.inSampleSize *= 2;
+            // A software bitmap, not HARDWARE: vividColor draws the banner into a Canvas for the glow.
+            Bitmap bmp = BitmapFactory.decodeFile(f.getPath(), opts);
+            if (bmp != null) return new BitmapDrawable(ctx.getResources(), bmp);
+        }
+        return null;
+    }
+
+    private static final String[] BANNER_TYPES = {".png", ".jpg", ".jpeg", ".webp"};
 
     /** A banner_* drawable bundled with the launcher, or null for none or a name that is not one. */
     private Drawable bundledBanner(String name) {

@@ -48,6 +48,7 @@ public class ThemeFilesTest {
     @Test public void onlyTheBareFolderIsTheCollection() {
         assertEquals("wallpapers", ThemeFiles.collection(Collections.singletonList("wallpapers")));
         assertEquals("avatars", ThemeFiles.collection(Collections.singletonList("avatars")));
+        assertEquals("banners", ThemeFiles.collection(Collections.singletonList("banners")));
         assertNull(ThemeFiles.collection(Arrays.asList("wallpapers", "dusk.jpg")));
         assertNull(ThemeFiles.collection(Collections.singletonList("config.json")));
     }
@@ -56,5 +57,14 @@ public class ThemeFilesTest {
         assertEquals("avatars/kris.png", ThemeFiles.path(Arrays.asList("avatars", "kris.png")));
         assertNull(ThemeFiles.path(Arrays.asList("avatars", "captions.txt")));
         assertNull(ThemeFiles.path(Arrays.asList("avatars", "../config.png")));
+    }
+
+    @Test public void bannersTakeImagesNamedByPackage() {
+        assertEquals("banners/com.spotify.tv.android.png",
+                ThemeFiles.path(Arrays.asList("banners", "com.spotify.tv.android.png")));
+        assertEquals("banners/com.google.android.youtube.tv.jpg",
+                ThemeFiles.path(Arrays.asList("banners", "com.google.android.youtube.tv.jpg")));
+        assertNull(ThemeFiles.path(Arrays.asList("banners", "captions.txt")));
+        assertNull(ThemeFiles.path(Arrays.asList("banners", "../config.png")));
     }
 }

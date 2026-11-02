@@ -112,12 +112,14 @@ del() { echo "rm -f $DIR/$1 2>/dev/null; content delete --uri $URI/$1 2>/dev/nul
 # that left the pictures behind still shows the theme it just removed. Both paths use this one string.
 # avatars/: the header's profile pictures (account_profiles), replaced the same way.
 CLEAR_AVATARS="rm -f $DIR/avatars/*.[jJ][pP][gG] $DIR/avatars/*.[jJ][pP][eE][gG] $DIR/avatars/*.[pP][nN][gG] $DIR/avatars/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/avatars 2>/dev/null"
+# banners/: tile pictures named by package (banners/com.spotify.tv.android.png), replaced the same way.
+CLEAR_BANNERS="rm -f $DIR/banners/*.[jJ][pP][gG] $DIR/banners/*.[jJ][pP][eE][gG] $DIR/banners/*.[pP][nN][gG] $DIR/banners/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/banners 2>/dev/null"
 # videos/: the video wallpapers the menu picks from (VideoWallpaper), with their names in videos/captions.txt.
 CLEAR_VIDEOS="rm -f $DIR/videos/*.[mM][pP]4 2>/dev/null; content delete --uri $URI/videos 2>/dev/null"
 CLEAR_WALLPAPERS="rm -f $DIR/wallpapers/*.[jJ][pP][gG] $DIR/wallpapers/*.[jJ][pP][eE][gG] $DIR/wallpapers/*.[pP][nN][gG] $DIR/wallpapers/*.[wW][eE][bB][pP] 2>/dev/null; content delete --uri $URI/wallpapers 2>/dev/null"
 
 if [ "${1:-}" = --reset ]; then
-  tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpaper.mp4); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; $CLEAR_AVATARS; $CLEAR_VIDEOS; $(del videos/captions.txt); printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
+  tv "mkdir -p $DIR 2>/dev/null; $(del config.json); $(del wallpaper.jpg); $(del wallpaper.mp4); $(del wallpapers/captions.txt); $CLEAR_WALLPAPERS; $CLEAR_AVATARS; $CLEAR_BANNERS; $CLEAR_VIDEOS; $(del videos/captions.txt); printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
   "$PY" -I theme_restart.py
   echo reset
   exit 0
@@ -187,6 +189,22 @@ if [ -d "$THEME/avatars" ]; then
     esac
   done
 fi
+BANNER_NAMES=""
+if [ -d "$THEME/banners" ]; then
+  for IMAGE in "$THEME"/banners/*; do
+    [ -f "$IMAGE" ] || continue
+    case "$IMAGE" in
+      *.[jJ][pP][gG]|*.[jJ][pP][eE][gG]|*.[pP][nN][gG]|*.[wW][eE][bB][pP])
+        NAME=$(basename "$IMAGE")
+        if [[ ! "$NAME" =~ ^[A-Za-z0-9_.-]+$ || "$NAME" == *..* ]]; then
+          echo "unsupported banner filename: $NAME (name it after the app's package, e.g. com.spotify.tv.android.png)." \
+            "Nothing was sent to the TV." >&2
+          exit 2
+        fi
+        BANNER_NAMES="$BANNER_NAMES $NAME" ;;
+    esac
+  done
+fi
 VIDEO_NAMES=""
 if [ -d "$THEME/videos" ]; then
   for VIDEO in "$THEME"/videos/*.[mM][pP]4; do
@@ -237,6 +255,11 @@ tv "$CLEAR_AVATARS" >/dev/null
 for NAME in $AVATAR_NAMES; do
   "$PY" -I b64push.py "$THEME/avatars/$NAME" "$(stage "avatars/$NAME")"
   tv "$(put "avatars/$NAME")" >/dev/null
+done
+tv "$CLEAR_BANNERS" >/dev/null
+for NAME in $BANNER_NAMES; do
+  "$PY" -I b64push.py "$THEME/banners/$NAME" "$(stage "banners/$NAME")"
+  tv "$(put "banners/$NAME")" >/dev/null
 done
 # The collection's names (wallpaper_captions); a theme without them leaves no stale names behind.
 if [ -f "$THEME/wallpapers/captions.txt" ]; then
