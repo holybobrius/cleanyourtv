@@ -99,7 +99,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     static final float FOCUS_SCALE = 1.10f;
     /** Design size of a tile (dp); tiles shrink from here when the columns don't fit, see tileWidthPx. */
-    static final float DESIGN_W_DP = 180f, DESIGN_H_DP = 101f;
+    // Quiet Graphite: a little more presence than the stock 180dp cards, while keeping the 16:9 silhouette.
+    static final float DESIGN_W_DP = 196f, DESIGN_H_DP = 110f;
 
     /**
      * Tile width for a grid of this inner width: the cell minus room for the focus zoom and the glass
@@ -432,8 +433,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             v.setPadding(v.getPaddingLeft(), pad, v.getPaddingRight(), pad);
         }
         name.setLayoutParams(nameLp);
-        // A sideways row would stretch a match_parent item across the whole screen: give it a grid column's width.
-        if (singleRow) v.getLayoutParams().width = inner / dockSize;
+        // A sideways row would stretch a match_parent item across the whole screen. Keep a deliberate 18dp
+        // breathing space instead of distributing six cards across the entire display with large empty gaps.
+        if (singleRow) v.getLayoutParams().width = w + Math.round(18f * density);
         if (uniformTiles) {
             // tvOS-style tile: a large centred mark, no caption inside the card.
             View icon = v.findViewById(R.id.icon);

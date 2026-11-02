@@ -834,7 +834,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             ((TextView) btnSettings).setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_home_settings_pill, 0, 0, 0);
         }
         btnSettings.setOnClickListener(v -> {
-            if (launcherSettingsButton) startActivityForResult(
+            if (cfg.settingsKeyPanel) startActivity(new Intent(this, QuickSettingsActivity.class));
+            else if (launcherSettingsButton) startActivityForResult(
                     new Intent(this, LauncherSettingsActivity.class), LAUNCHER_SETTINGS_REQUEST);
             else open(systemIntent(Settings.ACTION_SETTINGS));
         });
@@ -3047,6 +3048,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         pill.setPaddingRelative(pad, 0, pad, 0);
         pill.setCompoundDrawablePadding(0);
         pill.getLayoutParams().width = Math.round(42 * density);
+        pill.setBackgroundColor(Color.TRANSPARENT);
     }
 
     // ---- festive skin ------------------------------------------------------------------------------

@@ -352,7 +352,7 @@
                     android:format12Hour="h:mm"
                     android:format24Hour="HH:mm"
                     android:textColor="#FFFFFFFF"
-                    android:textSize="30sp"
+                    android:textSize="24sp"
                     android:fontFamily="@string/font_regular"
                     android:letterSpacing="0.01"
                     android:includeFontPadding="false" />

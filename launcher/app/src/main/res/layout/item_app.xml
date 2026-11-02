@@ -47,6 +47,15 @@
             android:textSize="13sp"
             android:fontFamily="@string/font_body"
             android:visibility="gone" />
+
+        <!-- Barely visible at rest: it separates banner art from a dark wallpaper without becoming a card backing. -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/tile_outline"
+            android:importantForAccessibility="no"
+            android:focusable="false"
+            android:clickable="false" />
     </FrameLayout>
 
     <TextView
