@@ -2026,7 +2026,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, A
             }
 
             @Override public void onAccountButton() {
-                chooseAccount();
+                openAccounts();
             }
         }, animations && !reducedMotion);
         List<MinimalHeader.Item> items = new ArrayList<>();
@@ -2129,6 +2129,22 @@ public class MainActivity extends Activity implements AppAdapter.TileListener, A
      * Android's account chooser. Picking an account there is also what lets the launcher see it: until then a
      * Google account is hidden from apps, and the header shows the theme's first profile.
      */
+    /**
+     * The account button: Android's Accounts and sign-in screen. Only while the launcher sees no Google account at all
+     * does it open the account chooser instead, since picking one there is what lets the launcher see it; with an
+     * account in sight the chooser would close at once and the button would seem to do nothing.
+     */
+    private void openAccounts() {
+        android.accounts.Account[] seen;
+        try {
+            seen = android.accounts.AccountManager.get(this).getAccountsByType(Profiles.GOOGLE);
+        } catch (RuntimeException e) {
+            seen = new android.accounts.Account[0];
+        }
+        if (seen.length == 0) chooseAccount();
+        else open(systemIntent(Settings.ACTION_SYNC_SETTINGS));
+    }
+
     private void chooseAccount() {
         String chosen = getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).getString(KEY_HEADER_ACCOUNT, null);
         android.accounts.Account selected = chosen != null ? new android.accounts.Account(chosen, Profiles.GOOGLE) : null;
